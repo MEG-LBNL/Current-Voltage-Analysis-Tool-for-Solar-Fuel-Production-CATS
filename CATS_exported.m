@@ -454,13 +454,33 @@ classdef CATS_exported < matlab.apps.AppBase
             IterationMeanResults.Properties.VariableUnits{'I0'} = 'A';
             app.I0AEditField.Value = mean(IterationResults.I0);
             
-            %% Save to mat file
-%             [filename, pathName] = uiputfile({'*.mat', 'All files (*.mat)'},...
-%                 'Choose name to save data','');
-%             FullFileName = [pathName filename];
-%             if(filename ~= 0)
-%                 save(FullFileName,'IterationResults','IterationMeanResults')
-%             end
+            %% Save to tab-separated *.txt file
+            IterationFile = table();
+            IterationFile.Isc_A = IterationResults.Isc;
+            IterationFile.Voc_V = IterationResults.Voc;
+            IterationFile.Rs_Ohm = IterationResults.Rs;
+            IterationFile.Rsh_Ohm = IterationResults.Rsh;
+            IterationFile.n = IterationResults.n;
+            IterationFile.I0_A = IterationResults.I0;
+
+            IterationMeanFile = table();
+            IterationMeanFile.Isc_A = app.IscnoshadingAEditField.Value;
+            IterationMeanFile.Voc_V = app.VocnoshadingVEditField.Value;
+            IterationMeanFile.Rs_Ohm = app.RsOhmEditField.Value;
+            IterationMeanFile.Rsh_Ohm = app.RshOhmEditField.Value;
+            IterationMeanFile.n = app.nEditField.Value;
+            IterationMeanFile.I0_A = app.I0AEditField.Value;
+
+            [filename, pathName] = uiputfile({'*.txt', 'All files (*.txt)'},...
+                'Choose name to save PV parameters to text files','');
+            FullFileName = [pathName filename];
+            if(filename ~= 0)
+                writetable(IterationFile, FullFileName, ...
+                    'Delimiter', '\t')
+                writetable(IterationMeanFile, strrep(FullFileName, ...
+                '.txt','_mean.txt'), 'Delimiter', '\t')
+                %save(FullFileName,'IterationResults','IterationMeanResults')
+            end
             PVparameters = IterationMeanResults;
         end
         %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -1289,11 +1309,21 @@ classdef CATS_exported < matlab.apps.AppBase
 
             %% Match current with voltage data and create common time axis
             IVData = table();
-            TimeIntervV = VData{1,1}.Time(101) - VData{1,1}.Time(100);
-            TimeIntervI = IData{1,1}.Time(101) - IData{1,1}.Time(100);
+            if(length(VData{1,1}.Time) > 100) %Interval between data points
+                TimeIntervV = VData{1,1}.Time(101) - VData{1,1}.Time(100);
+                TimeIntervI = IData{1,1}.Time(101) - IData{1,1}.Time(100);
+            elseif(length(VData{1,1}.Time) > 1)
+                TimeIntervV = VData{1,1}.Time(2) - VData{1,1}.Time(1);
+                TimeIntervI = IData{1,1}.Time(2) - IData{1,1}.Time(1);
+            else
+                warndlg(['Not enough data points available. A minimum' ...
+                    ' of 2 data points is required for current and ' ...
+                    'voltage data'],'Warning');
+            end
+
             if(TimeIntervI < TimeIntervV)
                 %Current is logged more frequently
-                IVData.Time = IData{1,1}.Time;
+                IVData.Time = IData{1,1}.Time-IData{1,1}.Time(1);
                 %Voltage assignment here
                 vVoltage = zeros(length(IData{1,1}.Time),1);
                 CurrentTime = IData{1,1}.Time;
@@ -1326,23 +1356,27 @@ classdef CATS_exported < matlab.apps.AppBase
                     vVoltage(1+(iTimeI-1)*ChunkSize:ChunkSize*iTimeI) = ...
                         Voltage(pos);  
 
-                    %Estimate completion time based on first run of loop
-                    if iTimeI == 1
-                         is = etime(clock,sClock);
-                         esttime = is * ...
-                             (floor(length(CurrentTime)/ChunkSize) + 1);
-                    end
-
                     %Update progress of waitbar
                     iProgress = iTimeI/ ...
                         (floor(length(CurrentTime)/ChunkSize)+1);
                     if(iProgress > 1), iProgress = 1; end
                     fWait.Value = iProgress;
-                    MinLeft = (esttime-etime(clock,sClock))/60;
-                    if(MinLeft < 0), MinLeft = 0; end
+
+                    %Estimate completion time based on first run of loop
+                    if iTimeI == 1
+                         is = etime(clock,sClock);
+                         esttime = is * ...
+                             (floor(length(CurrentTime)/ChunkSize) + 1);
+                    else%if (mod(iTimeI,10)==0) %Check every 10th loop
+                        is = etime(clock,sClock);
+                        esttime = is/iProgress;
+                    end
+                    SecLeft = round(esttime-etime(clock,sClock),0);
+                    if(SecLeft < 0), SecLeft = 0; end
                     fWait.Message = ['Estimated remaining time: ' ...
-                        num2str(floor(MinLeft), '%02.f') ':'...
-                        num2str(mod(MinLeft,1)*60, '%02.f')];
+                        num2str(floor(minutes(seconds(SecLeft))), ...
+                        '%02.f') ':'...
+                        num2str(mod(SecLeft, 60), '%02.f')];
                 end
 
                 if(iTimeI > 1) %Only do this if not done in one chunk
@@ -1357,11 +1391,15 @@ classdef CATS_exported < matlab.apps.AppBase
                         (floor(length(CurrentTime)/ChunkSize)+1);
                     if(iProgress > 1), iProgress = 1; end
                     fWait.Value = iProgress;
-                    MinLeft = (esttime-etime(clock,sClock))/60;
-                    if(MinLeft < 0), MinLeft = 0; end
+
+                    is = etime(clock,sClock);
+                    esttime = is/iProgress;
+                    SecLeft = round(esttime-etime(clock,sClock),0);
+                    if(SecLeft < 0), SecLeft = 0; end
                     fWait.Message = ['Estimated remaining time: ' ...
-                        num2str(floor(MinLeft), '%02.f') ':'...
-                        num2str(mod(MinLeft,1)*60, '%02.f')];
+                        num2str(floor(minutes(seconds(SecLeft))), ...
+                        '%02.f') ':'...
+                        num2str(mod(SecLeft, 60), '%02.f')];
                 end
                 close(fig1) %Close waitbar
 
@@ -1386,7 +1424,7 @@ classdef CATS_exported < matlab.apps.AppBase
                 IVData.Current = IData{1,1}.Current;
             else
                 %Equal interval or voltage is logged more frequently
-                IVData.Time = VData{1,1}.Time;
+                IVData.Time = VData{1,1}.Time-VData{1,1}.Time(1);
                 IVData.Voltage = VData{1,1}.Voltage;
                 %Current assignment here
                 vCurrent = zeros(length(VData{1,1}.Time),1);
@@ -1420,23 +1458,27 @@ classdef CATS_exported < matlab.apps.AppBase
                     vCurrent(1+(iTimeV-1)*ChunkSize:ChunkSize*iTimeV) = ...
                         Current(pos);
 
-                    %Estimate completion time based on first run of loop
-                    if iTimeV == 1
-                         is = etime(clock,sClock);
-                         esttime = is * ...
-                             (floor(length(CurrentTime)/ChunkSize) + 1);
-                    end
-
                     %Update progress of waitbar
                     iProgress = iTimeV/ ...
                         (floor(length(CurrentTime)/ChunkSize)+1);
                     if(iProgress > 1), iProgress = 1; end
                     fWait.Value = iProgress;
-                    MinLeft = (esttime-etime(clock,sClock))/60;
-                    if(MinLeft < 0), MinLeft = 0; end
+
+                    %Estimate completion time based on first run of loop
+                    if iTimeV == 1
+                        is = etime(clock,sClock);
+                        esttime = is * ...
+                             (floor(length(CurrentTime)/ChunkSize) + 1);
+                    else%if (mod(iTimeV,10)==0) %Check every 10th loop
+                        is = etime(clock,sClock);
+                        esttime = is/iProgress;
+                    end
+                    SecLeft = round(esttime-etime(clock,sClock),0);
+                    if(SecLeft < 0), SecLeft = 0; end
                     fWait.Message = ['Estimated remaining time: ' ...
-                        num2str(floor(MinLeft), '%02.f') ':'...
-                        num2str(mod(MinLeft,1)*60, '%02.f')];
+                        num2str(floor(minutes(seconds(SecLeft))), ...
+                        '%02.f') ':'...
+                        num2str(mod(SecLeft, 60), '%02.f')];
                 end
 
                 if(iTimeV > 1) %Only do this if not done in one chunk
@@ -1451,11 +1493,15 @@ classdef CATS_exported < matlab.apps.AppBase
                         (floor(length(CurrentTime)/ChunkSize)+1);
                     if(iProgress > 1), iProgress = 1; end
                     fWait.Value = iProgress;
-                    MinLeft = (esttime-etime(clock,sClock))/60;
-                    if(MinLeft < 0), MinLeft = 0; end
-                    fWait.Message = ['Estimated remaining time : ' ...
-                        num2str(floor(MinLeft), '%02.f') ':'...
-                        num2str(mod(MinLeft,1)*60, '%02.f')];
+
+                    is = etime(clock,sClock);
+                    esttime = is/iProgress;
+                    SecLeft = round(esttime-etime(clock,sClock),0);
+                    if(SecLeft < 0), SecLeft = 0; end
+                    fWait.Message = ['Estimated remaining time: ' ...
+                        num2str(floor(minutes(seconds(SecLeft))), ...
+                        '%02.f') ':'...
+                        num2str(mod(SecLeft, 60), '%02.f')];
                 end
                 close(fig1)
                 
@@ -1595,15 +1641,12 @@ classdef CATS_exported < matlab.apps.AppBase
         % Create UIFigure and components
         function createComponents(app)
 
-            % Get the file path for locating images
-            pathToMLAPP = fileparts(mfilename('fullpath'));
-
             % Create CATSUIFigure and hide until all components are created
             app.CATSUIFigure = uifigure('Visible', 'off');
             app.CATSUIFigure.AutoResizeChildren = 'off';
             app.CATSUIFigure.Position = [100 100 1020 662];
             app.CATSUIFigure.Name = 'CATS';
-            app.CATSUIFigure.Icon = fullfile(pathToMLAPP, 'CATS_resources', 'icon_48.png');
+            app.CATSUIFigure.Icon = 'H:\My Drive\MATLAB apps\CATS_resources\icon_48.png';
             app.CATSUIFigure.SizeChangedFcn = createCallbackFcn(app, @updateAppLayout, true);
 
             % Create GridLayout
@@ -2055,9 +2098,6 @@ classdef CATS_exported < matlab.apps.AppBase
             xlabel(app.UIAxes, 'Time [s]')
             ylabel(app.UIAxes, 'Voltage [V]')
             app.UIAxes.PlotBoxAspectRatio = [2.17910447761194 1 1];
-            app.UIAxes.XTickLabelRotation = 0;
-            app.UIAxes.YTickLabelRotation = 0;
-            app.UIAxes.ZTickLabelRotation = 0;
             app.UIAxes.Box = 'on';
             app.UIAxes.Position = [5 303 428 291];
 
@@ -2084,9 +2124,6 @@ classdef CATS_exported < matlab.apps.AppBase
             title(app.UIAxes2, 'PV fitting individual')
             xlabel(app.UIAxes2, 'Voltage [V]')
             ylabel(app.UIAxes2, 'Current [mA]')
-            app.UIAxes2.XTickLabelRotation = 0;
-            app.UIAxes2.YTickLabelRotation = 0;
-            app.UIAxes2.ZTickLabelRotation = 0;
             app.UIAxes2.Box = 'on';
             app.UIAxes2.Position = [1 332 432 282];
 
@@ -2095,9 +2132,6 @@ classdef CATS_exported < matlab.apps.AppBase
             title(app.UIAxes2_2, 'PV fitting with averaged parameters')
             xlabel(app.UIAxes2_2, 'Voltage [V]')
             ylabel(app.UIAxes2_2, 'Current [mA]')
-            app.UIAxes2_2.XTickLabelRotation = 0;
-            app.UIAxes2_2.YTickLabelRotation = 0;
-            app.UIAxes2_2.ZTickLabelRotation = 0;
             app.UIAxes2_2.Box = 'on';
             app.UIAxes2_2.Position = [5 43 428 281];
 
@@ -2111,9 +2145,6 @@ classdef CATS_exported < matlab.apps.AppBase
             xlabel(app.UIAxes_2, 'Time [s]')
             ylabel(app.UIAxes_2, 'Current [A]')
             app.UIAxes_2.PlotBoxAspectRatio = [2.17910447761194 1 1];
-            app.UIAxes_2.XTickLabelRotation = 0;
-            app.UIAxes_2.YTickLabelRotation = 0;
-            app.UIAxes_2.ZTickLabelRotation = 0;
             app.UIAxes_2.Box = 'on';
             app.UIAxes_2.Position = [5 335 428 291];
 
@@ -2123,9 +2154,6 @@ classdef CATS_exported < matlab.apps.AppBase
             xlabel(app.UIAxes_3, 'Time [s]')
             ylabel(app.UIAxes_3, 'Current [A]')
             app.UIAxes_3.PlotBoxAspectRatio = [2.17910447761194 1 1];
-            app.UIAxes_3.XTickLabelRotation = 0;
-            app.UIAxes_3.YTickLabelRotation = 0;
-            app.UIAxes_3.ZTickLabelRotation = 0;
             app.UIAxes_3.Box = 'on';
             app.UIAxes_3.Position = [5 40 428 290];
 
