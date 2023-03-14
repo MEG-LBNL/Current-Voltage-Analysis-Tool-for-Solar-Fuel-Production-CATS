@@ -286,9 +286,17 @@ classdef CATS_exported < matlab.apps.AppBase
             TotError = zeros(length(IVData),1);
             %Res_norm = zeros(length(IVData),1);
             if(size(IVData,2) > 1 && app.ParallelCheck.Value)
-              parforArg = Inf; %Run regular parfor loop
+                parforArg = Inf; %Run regular parfor loop
+                if(isempty(gcp('nocreate'))) %Start parallel pool if needed
+                    fig1 = uifigure;
+                    uiprogressdlg(fig1,'Title','Please wait',...
+                    'Message', 'Starting parallel pool...', ...
+                    'Cancelable','off');
+                    parpool; 
+                    close(fig1)
+                end
             else
-              parforArg = 0; %Runs essentially like a for loop
+                parforArg = 0; %Runs essentially like a for loop
             end
 
             parfor (iIter = 1:size(IVData,2), parforArg) %Extract parameters
@@ -454,7 +462,7 @@ classdef CATS_exported < matlab.apps.AppBase
             IterationMeanResults.Properties.VariableUnits{'I0'} = 'A';
             app.I0AEditField.Value = mean(IterationResults.I0);
             
-            %% Save to tab-separated *.txt file
+            %% Save to tab-separated *.txt file(s)
             IterationFile = table();
             IterationFile.Isc_A = IterationResults.Isc;
             IterationFile.Voc_V = IterationResults.Voc;
@@ -638,9 +646,17 @@ classdef CATS_exported < matlab.apps.AppBase
             %(no overpotential)
             IdealEC_Current = zeros(size(intensity,1),1);
             if app.ParallelCheck.Value
-              parforArg = Inf; %Run regular parfor loop
+                parforArg = Inf; %Run regular parfor loop
+                if(isempty(gcp('nocreate'))) %Start parallel pool if needed
+                    fig1 = uifigure;
+                    uiprogressdlg(fig1,'Title','Please wait',...
+                    'Message', 'Starting parallel pool...', ...
+                    'Cancelable','off');
+                    parpool; 
+                    close(fig1)
+                end
             else
-              parforArg = 0; %Runs essentially like a for loop
+                parforArg = 0; %Runs essentially like a for loop
             end
             parfor (iInt = 1:size(intensity,1), parforArg)
                 IdealEC_Current(iInt) = app_calculate_IV_PV(E0, ...
@@ -771,18 +787,27 @@ classdef CATS_exported < matlab.apps.AppBase
             %% Find curve for operating point -> determine effective light
             % intensity
             intensity = zeros(size(OpVolt,1),1);
-                
             options = optimset('TolFun', 1e-15,'Display','off');
+
+            if ParaCheck
+                parforArg = Inf; %Run regular parfor loop
+                if(isempty(gcp('nocreate'))) %Start parallel pool if needed
+                    fig1 = uifigure;
+                    uiprogressdlg(fig1,'Title','Please wait',...
+                    'Message', 'Starting parallel pool...', ...
+                    'Cancelable','off');
+                    parpool; 
+                    close(fig1)
+                end
+            else
+                parforArg = 0; %Runs essentially like a for loop
+            end
+
             D = parallel.pool.DataQueue;
-            h = waitbar(0, 'Please wait ...'); %Start waitbar
+            h = waitbar(0, 'Calculating ...'); %Start waitbar
             afterEach(D, @nUpdateWaitbar); %When data sent, update waitbar
             p = 1; %Progress value in waitbar
             
-            if ParaCheck
-              parforArg = Inf; %Run regular parfor loop
-            else
-              parforArg = 0; %Runs essentially like a for loop
-            end
             parfor (iPoint = 1:size(OpVolt,1), parforArg)
                 %Operating Point [V],[A]
                 Operating_point = [OpVolt(iPoint) OpCurrent(iPoint)];
@@ -929,19 +954,28 @@ classdef CATS_exported < matlab.apps.AppBase
             %Int_Aft_V = zeros(length(OpPointV),1);
             Int_Aft_C = zeros(length(OpPointV),1);
             
+            if app.ParallelCheck.Value
+                parforArg = Inf; %Run regular parfor loop
+                if(isempty(gcp('nocreate'))) %Start parallel pool if needed
+                    fig1 = uifigure;
+                    uiprogressdlg(fig1,'Title','Please wait',...
+                    'Message', 'Starting parallel pool...', ...
+                    'Cancelable','off');
+                    parpool; 
+                    close(fig1)
+                end
+            else
+                parforArg = 0; %Runs essentially like a for loop
+            end
+
             D = parallel.pool.DataQueue;
-            h = waitbar(0, 'Please wait ...');
+            h = waitbar(0, 'Calculating ...');
             num_files = length(OpPointV);
             % Dummy call to nUpdateWaitbar to initialise
             nUpdateWaitbar(app, num_files, h);
             % Go back to simply calling nUpdateWaitbar with the data
             afterEach(D, @nUpdateWaitbar);
             
-            if app.ParallelCheck.Value
-              parforArg = Inf; %Run regular parfor loop
-            else
-              parforArg = 0; %Runs essentially like a for loop
-            end
             parfor (iOP2 = 1:length(vAreaFrac), parforArg)
                 [~, interBef] = ...
                     app_intersections( ...
@@ -1641,12 +1675,15 @@ classdef CATS_exported < matlab.apps.AppBase
         % Create UIFigure and components
         function createComponents(app)
 
+            % Get the file path for locating images
+            pathToMLAPP = fileparts(mfilename('fullpath'));
+
             % Create CATSUIFigure and hide until all components are created
             app.CATSUIFigure = uifigure('Visible', 'off');
             app.CATSUIFigure.AutoResizeChildren = 'off';
             app.CATSUIFigure.Position = [100 100 1020 662];
             app.CATSUIFigure.Name = 'CATS';
-            app.CATSUIFigure.Icon = 'H:\My Drive\MATLAB apps\CATS_resources\icon_48.png';
+            app.CATSUIFigure.Icon = fullfile(pathToMLAPP, 'CATS_resources', 'icon_48.png');
             app.CATSUIFigure.SizeChangedFcn = createCallbackFcn(app, @updateAppLayout, true);
 
             % Create GridLayout
@@ -2098,6 +2135,9 @@ classdef CATS_exported < matlab.apps.AppBase
             xlabel(app.UIAxes, 'Time [s]')
             ylabel(app.UIAxes, 'Voltage [V]')
             app.UIAxes.PlotBoxAspectRatio = [2.17910447761194 1 1];
+            app.UIAxes.XTickLabelRotation = 0;
+            app.UIAxes.YTickLabelRotation = 0;
+            app.UIAxes.ZTickLabelRotation = 0;
             app.UIAxes.Box = 'on';
             app.UIAxes.Position = [5 303 428 291];
 
@@ -2124,6 +2164,9 @@ classdef CATS_exported < matlab.apps.AppBase
             title(app.UIAxes2, 'PV fitting individual')
             xlabel(app.UIAxes2, 'Voltage [V]')
             ylabel(app.UIAxes2, 'Current [mA]')
+            app.UIAxes2.XTickLabelRotation = 0;
+            app.UIAxes2.YTickLabelRotation = 0;
+            app.UIAxes2.ZTickLabelRotation = 0;
             app.UIAxes2.Box = 'on';
             app.UIAxes2.Position = [1 332 432 282];
 
@@ -2132,6 +2175,9 @@ classdef CATS_exported < matlab.apps.AppBase
             title(app.UIAxes2_2, 'PV fitting with averaged parameters')
             xlabel(app.UIAxes2_2, 'Voltage [V]')
             ylabel(app.UIAxes2_2, 'Current [mA]')
+            app.UIAxes2_2.XTickLabelRotation = 0;
+            app.UIAxes2_2.YTickLabelRotation = 0;
+            app.UIAxes2_2.ZTickLabelRotation = 0;
             app.UIAxes2_2.Box = 'on';
             app.UIAxes2_2.Position = [5 43 428 281];
 
@@ -2145,6 +2191,9 @@ classdef CATS_exported < matlab.apps.AppBase
             xlabel(app.UIAxes_2, 'Time [s]')
             ylabel(app.UIAxes_2, 'Current [A]')
             app.UIAxes_2.PlotBoxAspectRatio = [2.17910447761194 1 1];
+            app.UIAxes_2.XTickLabelRotation = 0;
+            app.UIAxes_2.YTickLabelRotation = 0;
+            app.UIAxes_2.ZTickLabelRotation = 0;
             app.UIAxes_2.Box = 'on';
             app.UIAxes_2.Position = [5 335 428 291];
 
@@ -2154,6 +2203,9 @@ classdef CATS_exported < matlab.apps.AppBase
             xlabel(app.UIAxes_3, 'Time [s]')
             ylabel(app.UIAxes_3, 'Current [A]')
             app.UIAxes_3.PlotBoxAspectRatio = [2.17910447761194 1 1];
+            app.UIAxes_3.XTickLabelRotation = 0;
+            app.UIAxes_3.YTickLabelRotation = 0;
+            app.UIAxes_3.ZTickLabelRotation = 0;
             app.UIAxes_3.Box = 'on';
             app.UIAxes_3.Position = [5 40 428 290];
 
