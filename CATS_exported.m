@@ -25,6 +25,13 @@ classdef CATS_exported < matlab.apps.AppBase
         CanECIVcurvesbeestimatedCheckBox  matlab.ui.control.CheckBox
         TimedependentECIVcurvesavailableCheckBox  matlab.ui.control.CheckBox
         ImportsettingsPanel           matlab.ui.container.Panel
+        ColumnnumbersLabel            matlab.ui.control.Label
+        VoltageColumnImport           matlab.ui.control.NumericEditField
+        VoltageEditField_3Label       matlab.ui.control.Label
+        CurrentColumnImport           matlab.ui.control.NumericEditField
+        CurrentEditField_3Label       matlab.ui.control.Label
+        TimeColumnImport              matlab.ui.control.NumericEditField
+        TimeEditField_3Label          matlab.ui.control.Label
         UnitsLabel                    matlab.ui.control.Label
         HeaderrowsEditField           matlab.ui.control.NumericEditField
         HeaderrowsEditFieldLabel      matlab.ui.control.Label
@@ -38,6 +45,8 @@ classdef CATS_exported < matlab.apps.AppBase
         DelimiterDropDownLabel        matlab.ui.control.Label
         PVfittingTab_2                matlab.ui.container.Tab
         ValuesforcalculationPanel     matlab.ui.container.Panel
+        LightconcentrationEditField   matlab.ui.control.NumericEditField
+        LightconcentrationEditFieldLabel  matlab.ui.control.Label
         MinimumvoltagePVParameter     matlab.ui.control.NumericEditField
         MinimumvoltageforPVparameterestimationVLabel  matlab.ui.control.Label
         SpeedFactor                   matlab.ui.control.NumericEditField
@@ -55,12 +64,12 @@ classdef CATS_exported < matlab.apps.AppBase
         RshOhmLabel                   matlab.ui.control.Label
         RsOhmEditField                matlab.ui.control.NumericEditField
         RsOhmEditFieldLabel           matlab.ui.control.Label
-        VocnoshadingVEditField        matlab.ui.control.NumericEditField
-        VocnoshadingVEditFieldLabel   matlab.ui.control.Label
-        IscnoshadingAEditField        matlab.ui.control.NumericEditField
-        IscnoshadingAEditFieldLabel   matlab.ui.control.Label
+        VocVEditField                 matlab.ui.control.NumericEditField
+        VocVEditFieldLabel            matlab.ui.control.Label
+        IscAEditField                 matlab.ui.control.NumericEditField
+        IscAEditFieldLabel            matlab.ui.control.Label
         IVsyncTab                     matlab.ui.container.Tab
-        ColumnnumberLabel             matlab.ui.control.Label
+        ColumnnumbersLabel_2          matlab.ui.control.Label
         DelimiterLabel                matlab.ui.control.Label
         VoltageDropDown_2             matlab.ui.control.DropDown
         VoltageDropDown_2Label        matlab.ui.control.Label
@@ -162,13 +171,17 @@ classdef CATS_exported < matlab.apps.AppBase
             IVData = cell(size(filename,2),2);
             
             %Load file(s)
+            Time = app.TimeColumnImport.Value;
+            Voltage = app.VoltageColumnImport.Value;
+            Current = app.CurrentColumnImport.Value;
             for iSize = 1:size(filename,2)
-                    Time = 1;
-                    Voltage = 2;
-                    Current = 3;
-                    Columns = [Time Voltage Current];
                     IVData{iSize,1} = ...
                         importdata(FullfileNameTxt{1,iSize},strDelimit,iHeaderLines);
+                    if(width(IVData{1,1}.data) == 2) %No time column
+                        Columns = [Voltage Current];
+                    else
+                        Columns = [Time Voltage Current];
+                    end
                     IVData{iSize,1}.data = IVData{iSize,1}.data(:,Columns);
                     IVData{iSize,1}.colheaders = IVData{iSize,1}.textdata;
                     IVData{iSize,2} = filename{1,iSize};
@@ -176,15 +189,15 @@ classdef CATS_exported < matlab.apps.AppBase
             
             for iSize = 1:size(filename,2)
                 if(strncmp(TimeUnits,'h',1))
-                    IVData{iSize,1}.data(:,1) = IVData{iSize,1}.data(:,1)*3600; %Convert h to s
+                    IVData{iSize,1}.data(:,Time) = IVData{iSize,1}.data(:,Time)*3600; %Convert h to s
                 elseif(strncmp(TimeUnits,'min',3))
-                    IVData{iSize,1}.data(:,1) = IVData{iSize,1}.data(:,1)*60; %Convert min to s
+                    IVData{iSize,1}.data(:,Time) = IVData{iSize,1}.data(:,Time)*60; %Convert min to s
                 end
                 if(strncmp(VoltageUnits,'mV',2))
-                    IVData{iSize,1}.data(:,2) = IVData{iSize,1}.data(:,2)/1000; %Convert mV to V
+                    IVData{iSize,1}.data(:,Voltage) = IVData{iSize,1}.data(:,Voltage)/1000; %Convert mV to V
                 end
                 if(strncmp(CurrentUnits,'mA',2))
-                    IVData{iSize,1}.data(:,3) = IVData{iSize,1}.data(:,3)/1000; %Convert mA to A
+                    IVData{iSize,1}.data(:,Current) = IVData{iSize,1}.data(:,Current)/1000; %Convert mA to A
                 end
             end
             
@@ -231,23 +244,60 @@ classdef CATS_exported < matlab.apps.AppBase
             app.RawDataPV = importIV(app);
             NumberOfFiles = size(app.RawDataPV,1);
             if(NumberOfFiles == 0), return; end
+
+            iVoltageColumn = app.VoltageColumnImport.Value;
+            iCurrentColumn = app.CurrentColumnImport.Value;
             
             IVData = cell(1,NumberOfFiles);
             
             for FileNumber = 1:NumberOfFiles
                 mask = true(length(app.RawDataPV{FileNumber,1}.data(:,1)),1);
-                iFirstHalf = sum(mask)/2; %Divide by 2 if only positive or neg. part
+                flagCV = false; %Check if CV or LSV
+                %Check if initial scanning direction is up or down
+                if(length(app.RawDataPV{FileNumber,1}.data) > 10)
+                    if(app.RawDataPV{FileNumber,1}.data(10,1) <= ...
+                            app.RawDataPV{FileNumber,1}.data(11,1))
+                        dirFac = 1;
+                    else
+                        dirFac = -1;
+                    end
+                else
+                    if(app.RawDataPV{FileNumber,1}.data(1,1) <= ...
+                            app.RawDataPV{FileNumber,1}.data(2,1))
+                        dirFac = 1;
+                    else
+                        dirFac = -1;
+                    end
+                end
+
+                for iT = 1:length(app.RawDataPV{FileNumber,1}.data)-1
+                    if(dirFac*app.RawDataPV{FileNumber,1}.data(iT+1,1) <...
+                            dirFac*app.RawDataPV{FileNumber,1}.data(iT,1))
+                        flagCV = true; %Voltage turns around
+                    end
+                end
+                if(flagCV)
+                    iFirstHalf = sum(mask)/2; %Only get half of data
+                else
+                    iFirstHalf = sum(mask);
+                end
+
                 iOnes = 0;
                 for iPoint = 1:size(mask,1)
                     if(mask(iPoint))
                         iOnes = iOnes + 1;
                     end
-                    if(iOnes > iFirstHalf) %> for increasing curve, < for decr. curve
-                       mask(iPoint) = 0; 
+                    %> for increasing curve, < for decr. curve
+                    if(iOnes > iFirstHalf)
+                        mask(iPoint) = 0; 
                     end
                 end
-                IVData{1,FileNumber}(:,1) = app.RawDataPV{FileNumber,1}.data(mask,2); %Voltage
-                IVData{1,FileNumber}(:,2) = app.RawDataPV{FileNumber,1}.data(mask,3); %Current
+                IVData{1,FileNumber}(:,1) = app.RawDataPV{FileNumber,...
+                    1}.data(mask,iVoltageColumn); %Voltage
+                %Parameter estimation currently limited to 1 sun
+                IVData{1,FileNumber}(:,2) = app.RawDataPV{FileNumber,...
+                    1}.data(mask,iCurrentColumn)/...
+                    app.LightconcentrationEditField.Value; %Current/sun
             end
             
             %% Starting values for iteration
@@ -417,11 +467,11 @@ classdef CATS_exported < matlab.apps.AppBase
             IterationResults.Properties.VariableUnits{'Intensity'} = 'sun';
             IterationResults.Isc = Isc_V;
             IterationResults.Properties.VariableUnits{'Isc'} = 'A';
-            app.IscnoshadingAEditField.Value = max(Isc_V);
+            app.IscAEditField.Value = max(Isc_V);
             IterationResults.Voc = Voc_V;
             IterationResults.Properties.VariableUnits{'Voc'} = 'V';
             [~, posJmax] = max(Isc_V);
-            app.VocnoshadingVEditField.Value = Voc_V(posJmax);
+            app.VocVEditField.Value = Voc_V(posJmax);
             IterationResults.Rs = xValues(:,1);
             IterationResults.Properties.VariableUnits{'Rs'} = 'Ohm';
             IterationResults.Rsh = xValues(:,2);
@@ -472,8 +522,8 @@ classdef CATS_exported < matlab.apps.AppBase
             IterationFile.I0_A = IterationResults.I0;
 
             IterationMeanFile = table();
-            IterationMeanFile.Isc_A = app.IscnoshadingAEditField.Value;
-            IterationMeanFile.Voc_V = app.VocnoshadingVEditField.Value;
+            IterationMeanFile.Isc_A = app.IscAEditField.Value;
+            IterationMeanFile.Voc_V = app.VocVEditField.Value;
             IterationMeanFile.Rs_Ohm = app.RsOhmEditField.Value;
             IterationMeanFile.Rsh_Ohm = app.RshOhmEditField.Value;
             IterationMeanFile.n = app.nEditField.Value;
@@ -606,7 +656,7 @@ classdef CATS_exported < matlab.apps.AppBase
             %Calculates current losses due to PV/EC based on comparison of
             %operating point with IV curves of PV and EC components
             
-            if(app.IscnoshadingAEditField.Value == 0)
+            if(app.IscAEditField.Value == 0)
                 warndlg(['Please check if parameters in PV fitting' ...
                     ' tab have been entered'],'Warning');
                 return;
@@ -619,9 +669,9 @@ classdef CATS_exported < matlab.apps.AppBase
             Rsh = app.RshOhmEditField.Value; %Shunt resistance [Ohm]
             n = app.nEditField.Value; %Ideality factor
             %Short circuit current at 1 sun (no shading) [A]
-            Isc_initial = app.IscnoshadingAEditField.Value;
+            Isc_initial = app.IscAEditField.Value;
             %Open circuit voltage at 1 sun (no shading) [V]
-            Voc_initial = app.VocnoshadingVEditField.Value;
+            Voc_initial = app.VocVEditField.Value;
             %Standard potential difference for full cell reaction
             E0 = app.E0EditField.Value; %[V]
             TempPV = app.PVtemperatureCEditField.Value + 273.15; %[K]
@@ -980,11 +1030,11 @@ classdef CATS_exported < matlab.apps.AppBase
                 [~, interBef] = ...
                     app_intersections( ...
                     EC_V,EC_C*vAreaFrac(iOP2),Before_V,Before_C,1);
-                if(~isempty(interBef)), Int_Bef_C(iOP2) = interBef; end
+                if(~isempty(interBef)), Int_Bef_C(iOP2) = interBef(1); end
                 [~, interAft] = ...
                     app_intersections( ...
                     EC_V,EC_C*vAreaFrac(iOP2),After_V,After_C,1);
-                if(~isempty(interAft)), Int_Aft_C(iOP2) = interAft; end
+                if(~isempty(interAft)), Int_Aft_C(iOP2) = interAft(1); end
                 send(D, 1);
             end
             close(h)
@@ -1217,8 +1267,8 @@ classdef CATS_exported < matlab.apps.AppBase
         % Button pushed function: EstimatePVparametersButton
         function EstimatePVparametersButtonPushed(app, event)
             app.PVparameters = estimate_PV_Param(app);
-%             app.IscnoshadingAEditField.Value = app.PVparameters.Isc1sun;
-%             app.VocnoshadingVEditField = app.PVparameters.Voc1sun;
+%             app.IscAEditField.Value = app.PVparameters.Isc1sun;
+%             app.VocVEditField = app.PVparameters.Voc1sun;
 %             app.RsOhmEditField = app.PVparameters.Rs;
 %             app.RshOhmEditField = app.PVparameters.Rsh;
 %             app.nEditField = app.PVparameters.n;
@@ -1368,6 +1418,10 @@ classdef CATS_exported < matlab.apps.AppBase
                 %Use 90% of available memory to calculate matches
                 ChunkSize = floor(MaxMemory.MaxPossibleArrayBytes...
                     *0.9/8/length(CurrentTime));
+                %Don't try to use more than values are available
+                if(ChunkSize > length(CurrentTime))
+                    ChunkSize = length(CurrentTime);
+                end
                 
                 %Initialize waitbar
                 fig1 = uifigure;
@@ -1378,7 +1432,8 @@ classdef CATS_exported < matlab.apps.AppBase
                 drawnow
                 sClock = clock;
 
-                for iTimeI = 1:floor(length(CurrentTime)/ChunkSize)
+                nChunks = floor(length(CurrentTime)/ChunkSize);
+                for iTimeI = 1:nChunks
                     if fWait.CancelRequested %If user cancels
                         close(fig1)
                         return
@@ -1470,6 +1525,10 @@ classdef CATS_exported < matlab.apps.AppBase
                 %Use 90% of available memory to calculate matches
                 ChunkSize = floor(MaxMemory.MaxPossibleArrayBytes...
                     *0.9/8/length(VoltageTime));
+                %Don't try to use more than values are available
+                if(ChunkSize > length(VoltageTime))
+                    ChunkSize = length(VoltageTime);
+                end
                 
                 %Initialize waitbar
                 fig1 = uifigure;
@@ -1480,7 +1539,8 @@ classdef CATS_exported < matlab.apps.AppBase
                 drawnow
                 sClock = clock;
 
-                for iTimeV = 1:floor(length(VoltageTime)/ChunkSize)
+                nChunks = floor(length(VoltageTime)/ChunkSize);
+                for iTimeV = 1:nChunks
                     if fWait.CancelRequested %If user cancels
                         close(fig1)
                         return
@@ -1713,80 +1773,120 @@ classdef CATS_exported < matlab.apps.AppBase
             app.ImportsettingsPanel.TitlePosition = 'centertop';
             app.ImportsettingsPanel.Title = 'Import settings';
             app.ImportsettingsPanel.FontWeight = 'bold';
-            app.ImportsettingsPanel.Position = [11 454 304 126];
+            app.ImportsettingsPanel.Position = [11 395 304 185];
 
             % Create DelimiterDropDownLabel
             app.DelimiterDropDownLabel = uilabel(app.ImportsettingsPanel);
             app.DelimiterDropDownLabel.HorizontalAlignment = 'right';
-            app.DelimiterDropDownLabel.Position = [10 66 53 22];
+            app.DelimiterDropDownLabel.Position = [10 125 53 22];
             app.DelimiterDropDownLabel.Text = 'Delimiter';
 
             % Create DelimiterDropDown
             app.DelimiterDropDown = uidropdown(app.ImportsettingsPanel);
             app.DelimiterDropDown.Items = {'Comma', 'Space', 'Tab'};
-            app.DelimiterDropDown.Position = [96 66 75 22];
+            app.DelimiterDropDown.Position = [96 125 75 22];
             app.DelimiterDropDown.Value = 'Tab';
 
             % Create CurrentDropDownLabel
             app.CurrentDropDownLabel = uilabel(app.ImportsettingsPanel);
             app.CurrentDropDownLabel.HorizontalAlignment = 'right';
-            app.CurrentDropDownLabel.Position = [2 12 45 22];
+            app.CurrentDropDownLabel.Position = [2 71 45 22];
             app.CurrentDropDownLabel.Text = 'Current';
 
             % Create CurrentDropDown
             app.CurrentDropDown = uidropdown(app.ImportsettingsPanel);
             app.CurrentDropDown.Items = {'A', 'mA'};
-            app.CurrentDropDown.Position = [50 12 53 22];
+            app.CurrentDropDown.Position = [50 71 53 22];
             app.CurrentDropDown.Value = 'mA';
 
             % Create VoltageDropDownLabel
             app.VoltageDropDownLabel = uilabel(app.ImportsettingsPanel);
             app.VoltageDropDownLabel.HorizontalAlignment = 'right';
-            app.VoltageDropDownLabel.Position = [107 12 45 22];
+            app.VoltageDropDownLabel.Position = [107 71 45 22];
             app.VoltageDropDownLabel.Text = 'Voltage';
 
             % Create VoltageDropDown
             app.VoltageDropDown = uidropdown(app.ImportsettingsPanel);
             app.VoltageDropDown.Items = {'V', 'mV'};
-            app.VoltageDropDown.Position = [155 12 50 22];
+            app.VoltageDropDown.Position = [155 71 50 22];
             app.VoltageDropDown.Value = 'V';
 
             % Create TimeDropDownLabel
             app.TimeDropDownLabel = uilabel(app.ImportsettingsPanel);
             app.TimeDropDownLabel.HorizontalAlignment = 'right';
-            app.TimeDropDownLabel.Position = [211 12 31 22];
+            app.TimeDropDownLabel.Position = [211 71 31 22];
             app.TimeDropDownLabel.Text = 'Time';
 
             % Create TimeDropDown
             app.TimeDropDown = uidropdown(app.ImportsettingsPanel);
             app.TimeDropDown.Items = {'s', 'min', 'h'};
-            app.TimeDropDown.Position = [246 12 53 22];
+            app.TimeDropDown.Position = [246 71 53 22];
             app.TimeDropDown.Value = 's';
 
             % Create HeaderrowsEditFieldLabel
             app.HeaderrowsEditFieldLabel = uilabel(app.ImportsettingsPanel);
             app.HeaderrowsEditFieldLabel.HorizontalAlignment = 'right';
-            app.HeaderrowsEditFieldLabel.Position = [183 66 74 22];
+            app.HeaderrowsEditFieldLabel.Position = [183 125 74 22];
             app.HeaderrowsEditFieldLabel.Text = 'Header rows';
 
             % Create HeaderrowsEditField
             app.HeaderrowsEditField = uieditfield(app.ImportsettingsPanel, 'numeric');
-            app.HeaderrowsEditField.Position = [264 66 34 22];
+            app.HeaderrowsEditField.Position = [264 125 34 22];
             app.HeaderrowsEditField.Value = 1;
 
             % Create UnitsLabel
             app.UnitsLabel = uilabel(app.ImportsettingsPanel);
             app.UnitsLabel.HorizontalAlignment = 'center';
             app.UnitsLabel.FontWeight = 'bold';
-            app.UnitsLabel.Position = [137 36 35 22];
+            app.UnitsLabel.Position = [137 95 35 22];
             app.UnitsLabel.Text = 'Units';
+
+            % Create TimeEditField_3Label
+            app.TimeEditField_3Label = uilabel(app.ImportsettingsPanel);
+            app.TimeEditField_3Label.HorizontalAlignment = 'right';
+            app.TimeEditField_3Label.Position = [216 13 31 22];
+            app.TimeEditField_3Label.Text = 'Time';
+
+            % Create TimeColumnImport
+            app.TimeColumnImport = uieditfield(app.ImportsettingsPanel, 'numeric');
+            app.TimeColumnImport.Position = [253 13 41 22];
+            app.TimeColumnImport.Value = 1;
+
+            % Create CurrentEditField_3Label
+            app.CurrentEditField_3Label = uilabel(app.ImportsettingsPanel);
+            app.CurrentEditField_3Label.HorizontalAlignment = 'right';
+            app.CurrentEditField_3Label.Position = [0 11 50 22];
+            app.CurrentEditField_3Label.Text = 'Current';
+
+            % Create CurrentColumnImport
+            app.CurrentColumnImport = uieditfield(app.ImportsettingsPanel, 'numeric');
+            app.CurrentColumnImport.Position = [57 11 40 22];
+            app.CurrentColumnImport.Value = 2;
+
+            % Create VoltageEditField_3Label
+            app.VoltageEditField_3Label = uilabel(app.ImportsettingsPanel);
+            app.VoltageEditField_3Label.HorizontalAlignment = 'right';
+            app.VoltageEditField_3Label.Position = [109 13 45 22];
+            app.VoltageEditField_3Label.Text = 'Voltage';
+
+            % Create VoltageColumnImport
+            app.VoltageColumnImport = uieditfield(app.ImportsettingsPanel, 'numeric');
+            app.VoltageColumnImport.Position = [162 13 41 22];
+            app.VoltageColumnImport.Value = 3;
+
+            % Create ColumnnumbersLabel
+            app.ColumnnumbersLabel = uilabel(app.ImportsettingsPanel);
+            app.ColumnnumbersLabel.HorizontalAlignment = 'center';
+            app.ColumnnumbersLabel.FontWeight = 'bold';
+            app.ColumnnumbersLabel.Position = [111 39 104 22];
+            app.ColumnnumbersLabel.Text = 'Column numbers';
 
             % Create MethodoptionsPanel
             app.MethodoptionsPanel = uipanel(app.GeneralTab);
             app.MethodoptionsPanel.TitlePosition = 'centertop';
             app.MethodoptionsPanel.Title = 'Method options';
             app.MethodoptionsPanel.FontWeight = 'bold';
-            app.MethodoptionsPanel.Position = [11 319 304 124];
+            app.MethodoptionsPanel.Position = [11 256 304 124];
 
             % Create TimedependentECIVcurvesavailableCheckBox
             app.TimedependentECIVcurvesavailableCheckBox = uicheckbox(app.MethodoptionsPanel);
@@ -1819,7 +1919,7 @@ classdef CATS_exported < matlab.apps.AppBase
             app.CalculationoptionsPanel.TitlePosition = 'centertop';
             app.CalculationoptionsPanel.Title = 'Calculation options';
             app.CalculationoptionsPanel.FontWeight = 'bold';
-            app.CalculationoptionsPanel.Position = [12 126 303 181];
+            app.CalculationoptionsPanel.Position = [12 63 303 181];
 
             % Create StartandendtimeforcurrentvoltageanalysisLabel
             app.StartandendtimeforcurrentvoltageanalysisLabel = uilabel(app.CalculationoptionsPanel);
@@ -1877,7 +1977,7 @@ classdef CATS_exported < matlab.apps.AppBase
             % Create ParallelCheck
             app.ParallelCheck = uicheckbox(app.GeneralTab);
             app.ParallelCheck.Text = 'Enable parallel computing';
-            app.ParallelCheck.Position = [13 95 160 22];
+            app.ParallelCheck.Position = [13 32 160 22];
             app.ParallelCheck.Value = true;
 
             % Create PVfittingTab_2
@@ -1889,27 +1989,27 @@ classdef CATS_exported < matlab.apps.AppBase
             app.CalculatedparametersPanel.TitlePosition = 'centertop';
             app.CalculatedparametersPanel.Title = 'Calculated parameters';
             app.CalculatedparametersPanel.FontWeight = 'bold';
-            app.CalculatedparametersPanel.Position = [3 209 321 221];
+            app.CalculatedparametersPanel.Position = [3 188 321 221];
 
-            % Create IscnoshadingAEditFieldLabel
-            app.IscnoshadingAEditFieldLabel = uilabel(app.CalculatedparametersPanel);
-            app.IscnoshadingAEditFieldLabel.HorizontalAlignment = 'right';
-            app.IscnoshadingAEditFieldLabel.Position = [26 165 109 22];
-            app.IscnoshadingAEditFieldLabel.Text = 'Isc (no shading) [A]';
+            % Create IscAEditFieldLabel
+            app.IscAEditFieldLabel = uilabel(app.CalculatedparametersPanel);
+            app.IscAEditFieldLabel.HorizontalAlignment = 'right';
+            app.IscAEditFieldLabel.Position = [26 165 109 22];
+            app.IscAEditFieldLabel.Text = 'Isc [A]';
 
-            % Create IscnoshadingAEditField
-            app.IscnoshadingAEditField = uieditfield(app.CalculatedparametersPanel, 'numeric');
-            app.IscnoshadingAEditField.Position = [143 165 91 22];
+            % Create IscAEditField
+            app.IscAEditField = uieditfield(app.CalculatedparametersPanel, 'numeric');
+            app.IscAEditField.Position = [143 165 91 22];
 
-            % Create VocnoshadingVEditFieldLabel
-            app.VocnoshadingVEditFieldLabel = uilabel(app.CalculatedparametersPanel);
-            app.VocnoshadingVEditFieldLabel.HorizontalAlignment = 'right';
-            app.VocnoshadingVEditFieldLabel.Position = [21 134 114 22];
-            app.VocnoshadingVEditFieldLabel.Text = 'Voc (no shading) [V]';
+            % Create VocVEditFieldLabel
+            app.VocVEditFieldLabel = uilabel(app.CalculatedparametersPanel);
+            app.VocVEditFieldLabel.HorizontalAlignment = 'right';
+            app.VocVEditFieldLabel.Position = [21 134 114 22];
+            app.VocVEditFieldLabel.Text = 'Voc [V]';
 
-            % Create VocnoshadingVEditField
-            app.VocnoshadingVEditField = uieditfield(app.CalculatedparametersPanel, 'numeric');
-            app.VocnoshadingVEditField.Position = [143 134 91 22];
+            % Create VocVEditField
+            app.VocVEditField = uieditfield(app.CalculatedparametersPanel, 'numeric');
+            app.VocVEditField.Position = [143 134 91 22];
 
             % Create RsOhmEditFieldLabel
             app.RsOhmEditFieldLabel = uilabel(app.CalculatedparametersPanel);
@@ -1956,36 +2056,36 @@ classdef CATS_exported < matlab.apps.AppBase
             app.ValuesforcalculationPanel.TitlePosition = 'centertop';
             app.ValuesforcalculationPanel.Title = 'Values for calculation';
             app.ValuesforcalculationPanel.FontWeight = 'bold';
-            app.ValuesforcalculationPanel.Position = [3 442 321 132];
+            app.ValuesforcalculationPanel.Position = [3 416 321 158];
 
             % Create PVsizecm2EditFieldLabel
             app.PVsizecm2EditFieldLabel = uilabel(app.ValuesforcalculationPanel);
             app.PVsizecm2EditFieldLabel.HorizontalAlignment = 'right';
             app.PVsizecm2EditFieldLabel.Enable = 'off';
-            app.PVsizecm2EditFieldLabel.Position = [22 15 79 22];
+            app.PVsizecm2EditFieldLabel.Position = [22 41 79 22];
             app.PVsizecm2EditFieldLabel.Text = 'PV size [cm2]';
 
             % Create PVsizecm2EditField
             app.PVsizecm2EditField = uieditfield(app.ValuesforcalculationPanel, 'numeric');
             app.PVsizecm2EditField.Enable = 'off';
-            app.PVsizecm2EditField.Position = [108 15 28 22];
+            app.PVsizecm2EditField.Position = [108 41 28 22];
             app.PVsizecm2EditField.Value = 1;
 
             % Create PVtemperatureCLabel
             app.PVtemperatureCLabel = uilabel(app.ValuesforcalculationPanel);
             app.PVtemperatureCLabel.HorizontalAlignment = 'right';
-            app.PVtemperatureCLabel.Position = [145 15 113 22];
+            app.PVtemperatureCLabel.Position = [145 41 113 22];
             app.PVtemperatureCLabel.Text = 'PV temperature [°C]';
 
             % Create PVtemperatureCEditField
             app.PVtemperatureCEditField = uieditfield(app.ValuesforcalculationPanel, 'numeric');
-            app.PVtemperatureCEditField.Position = [264 15 45 22];
+            app.PVtemperatureCEditField.Position = [264 41 45 22];
             app.PVtemperatureCEditField.Value = 25;
 
             % Create FactortoincreasespeedforPVparameterestimationEditFieldLabel
             app.FactortoincreasespeedforPVparameterestimationEditFieldLabel = uilabel(app.ValuesforcalculationPanel);
             app.FactortoincreasespeedforPVparameterestimationEditFieldLabel.HorizontalAlignment = 'right';
-            app.FactortoincreasespeedforPVparameterestimationEditFieldLabel.Position = [7 46 97 56];
+            app.FactortoincreasespeedforPVparameterestimationEditFieldLabel.Position = [7 72 97 56];
             app.FactortoincreasespeedforPVparameterestimationEditFieldLabel.Text = {'Factor to'; 'increase speed'; 'for PV parameter'; 'estimation'};
 
             % Create SpeedFactor
@@ -1993,19 +2093,33 @@ classdef CATS_exported < matlab.apps.AppBase
             app.SpeedFactor.Limits = [1 Inf];
             app.SpeedFactor.RoundFractionalValues = 'on';
             app.SpeedFactor.ValueDisplayFormat = '%.0f';
-            app.SpeedFactor.Position = [108 43 28 59];
+            app.SpeedFactor.Position = [108 69 28 59];
             app.SpeedFactor.Value = 1;
 
             % Create MinimumvoltageforPVparameterestimationVLabel
             app.MinimumvoltageforPVparameterestimationVLabel = uilabel(app.ValuesforcalculationPanel);
             app.MinimumvoltageforPVparameterestimationVLabel.HorizontalAlignment = 'right';
-            app.MinimumvoltageforPVparameterestimationVLabel.Position = [157 53 97 42];
+            app.MinimumvoltageforPVparameterestimationVLabel.Position = [157 79 97 42];
             app.MinimumvoltageforPVparameterestimationVLabel.Text = {'Minimum voltage'; 'for PV parameter'; 'estimation [V]'};
 
             % Create MinimumvoltagePVParameter
             app.MinimumvoltagePVParameter = uieditfield(app.ValuesforcalculationPanel, 'numeric');
-            app.MinimumvoltagePVParameter.Position = [264 53 45 42];
+            app.MinimumvoltagePVParameter.Position = [264 79 45 42];
             app.MinimumvoltagePVParameter.Value = 1.5;
+
+            % Create LightconcentrationEditFieldLabel
+            app.LightconcentrationEditFieldLabel = uilabel(app.ValuesforcalculationPanel);
+            app.LightconcentrationEditFieldLabel.HorizontalAlignment = 'right';
+            app.LightconcentrationEditFieldLabel.Enable = 'off';
+            app.LightconcentrationEditFieldLabel.Position = [152 11 106 22];
+            app.LightconcentrationEditFieldLabel.Text = 'Light concentration';
+
+            % Create LightconcentrationEditField
+            app.LightconcentrationEditField = uieditfield(app.ValuesforcalculationPanel, 'numeric');
+            app.LightconcentrationEditField.Editable = 'off';
+            app.LightconcentrationEditField.Enable = 'off';
+            app.LightconcentrationEditField.Position = [264 11 44 22];
+            app.LightconcentrationEditField.Value = 1;
 
             % Create IVsyncTab
             app.IVsyncTab = uitab(app.TabGroup2);
@@ -2104,12 +2218,12 @@ classdef CATS_exported < matlab.apps.AppBase
             app.DelimiterLabel.Position = [135 461 56 22];
             app.DelimiterLabel.Text = 'Delimiter';
 
-            % Create ColumnnumberLabel
-            app.ColumnnumberLabel = uilabel(app.IVsyncTab);
-            app.ColumnnumberLabel.HorizontalAlignment = 'center';
-            app.ColumnnumberLabel.FontWeight = 'bold';
-            app.ColumnnumberLabel.Position = [115 395 97 22];
-            app.ColumnnumberLabel.Text = 'Column number';
+            % Create ColumnnumbersLabel_2
+            app.ColumnnumbersLabel_2 = uilabel(app.IVsyncTab);
+            app.ColumnnumbersLabel_2.HorizontalAlignment = 'center';
+            app.ColumnnumbersLabel_2.FontWeight = 'bold';
+            app.ColumnnumbersLabel_2.Position = [112 395 104 22];
+            app.ColumnnumbersLabel_2.Text = 'Column numbers';
 
             % Create v01Label
             app.v01Label = uilabel(app.LeftPanel);
